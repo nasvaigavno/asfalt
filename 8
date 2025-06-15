@@ -1,3 +1,11 @@
+if not getgenv().Pets then
+    print("No Pets Table")
+    return nil
+end
+local targetpetsnames = getgenv().Pets
+repeat wait() until game:IsLoaded()
+wait(3)
+
 local t = require(game.ReplicatedStorage.Library.Items.Types)
 local v9 = require(game.ReplicatedStorage.Library.Client.CurrencyCmds)
 local v20 = require(game.ReplicatedStorage.Library.Functions)
