@@ -1,0 +1,288 @@
+local t = require(game.ReplicatedStorage.Library.Items.Types)
+local v9 = require(game.ReplicatedStorage.Library.Client.CurrencyCmds)
+local v20 = require(game.ReplicatedStorage.Library.Functions)
+local v13 = require(game.ReplicatedStorage.Library.Client.Network)
+local v3 = require(game.ReplicatedStorage.Library.Items.PetItem)
+local ts = require(game:GetService("ReplicatedStorage").Library.Client.TradingCmds.TradeState)
+
+local function DeepCopyPure(v0)
+    if type(v0) ~= "table" then
+        return v0;
+    else
+        --assert(not getmetatable(v0));
+        --local v2 = v1 or {};
+        --assert(not v2[v0]);
+        --v2[v0] = true;
+        local v3 = {};
+        for v4, v5 in next, v0 do
+            v3[DeepCopyPure(v4)] = DeepCopyPure(v5);
+        end;
+        --v2[v0] = nil;
+        return v3;
+    end;
+end;
+
+
+for i,v in pairs(targetpetsnames) do
+    v.Name = v[1]
+    v.Type = v[2]
+    v.IsShiny = v[3]
+    v.XP = v[4]
+    v.CharmsAmount = v[5]
+    v.PopulatedUID = false
+    local S
+    if v[3] then
+        S = "S"
+    else
+        S = ""
+    end
+    v.TypeS = v.Type .. S
+end
+
+local populatedids = {ids = {}}
+
+for _,v in pairs(targetpetsnames) do
+    local targetpetname = v.Name
+    local petprotos = {
+        ["N"] = function() return v3(targetpetname):SetType(0):SetShiny(false) end,
+        ["G"] = function() return v3(targetpetname):SetType(1):SetShiny(false) end,
+        ["R"] = function() return v3(targetpetname):SetType(2):SetShiny(false) end,
+        ["NS"] = function() return v3(targetpetname):SetType(0):SetShiny(true) end,
+        ["GS"] = function() return v3(targetpetname):SetType(1):SetShiny(true) end,
+        ["RS"] = function() return v3(targetpetname):SetType(2):SetShiny(true) end
+    }
+
+    local targetrap = {}
+    local targetexists = {}
+
+    for i,v in pairs(petprotos) do
+        local protopet = v()
+        protopet:PopulateUID()
+        targetrap[i] = protopet:GetRAP()
+        targetexists[i] = protopet:GetExistCount()
+    end
+
+    populatedids[targetpetname] = {
+        petprotos = petprotos,
+        poptargetpetname = targetpetname,
+        poptargetrap = targetrap,
+        poptargetexists = targetexists,
+        poppets = {}
+    }
+end
+
+local lasttick = 0
+local function updateLastTick()
+    lasttick = workspace:GetServerTimeNow()
+end
+
+local currentservertime
+coroutine.wrap(function()
+    while task.wait() do
+        currentservertime = workspace:GetServerTimeNow()
+    end
+end)()
+
+local diamondsproto = function()
+    local diamondstemp = DeepCopyPure(v9.GetItem("Diamonds"))
+    setmetatable(diamondstemp, getmetatable(v9.GetItem("Diamonds")))
+    diamondstemp._data._am = 0
+    return diamondstemp
+end
+
+local tradeselecteditems = {}
+
+for i,v in pairs(t.Types.Pet:All()) do
+    populatedids.ids[i] = v
+end
+
+local a = require(game:GetService("ReplicatedStorage").Library.Items.AbstractItem).Prototype
+local oldf = a.GetExistCount
+a.GetExistCount = function(arg1)
+    if populatedids[arg1:StackKey()] then
+        return populatedids[arg1:StackKey()].poptargetexists[arg1.faketype]
+    else
+        return oldf(arg1)
+    end
+end
+
+local RAP = require(game:GetService("ReplicatedStorage").Library.Client.RAPCmds)
+local oldrap = RAP.Get
+RAP.Get = function(arg1)
+    if populatedids[arg1:StackKey()] then
+        return populatedids[arg1:StackKey()].poptargetrap[arg1.faketype]
+    else
+        return oldrap(arg1)
+    end
+end
+
+local function main()
+    local a = getmetatable(t.Types.Pet)
+    local oldc = a.__index.All
+    local c = function(arg1)
+        local at0 = oldc(arg1)
+        local at1 = DeepCopyPure(at0)
+
+        for i,v in pairs(at1) do
+            setmetatable(v, getmetatable(at0[i]))
+        end
+        setmetatable(at1, getmetatable(oldc(arg1)))
+
+        if arg1.Class.Name == "Pet" then
+            for i,v in pairs(targetpetsnames) do
+                local charmsamount = v.CharmsAmount or 2
+                local typeS = v.TypeS
+                if type(v) == "table" then
+                    local targetpetname = v.Name 
+                    local targetuid
+                    if not v.PopulatedUID then
+                        local v60 = populatedids[targetpetname].petprotos[typeS]()
+                        v60:PopulateUID()
+                        targetuid = v60:GetUID()
+                        v.PopulatedUID = targetuid
+                        local fakepetuid = targetuid
+                        at1[fakepetuid] = v60
+                        populatedids[targetpetname].poppets[i] = fakepetuid
+                        local fakepettype = v.Type
+                        local fakepet = at1[fakepetuid]
+                        local faketable = getmetatable(fakepet)
+                        local targetxp
+                        if v.XP then
+                            targetxp = v.XP
+                        else
+                            targetxp = math.random(500000,1000000)
+                        end
+                        setmetatable(fakepet, faketable)
+                        fakepet._charmSlots = charmsamount
+                        fakepet._uid = fakepetuid
+                        fakepet:SetId(targetpetname)
+                        fakepet.Class.Abstract = true
+                        fakepet:AddXP(targetxp)
+                        fakepet._stackKey = targetpetname
+                        fakepet._exactStackKey = targetpetname
+                        fakepet.faketype = typeS
+                        if fakepettype == "G" then
+                            fakepet:SetGolden()
+                        elseif fakepettype == "R" then
+                            fakepet:SetRainbow()
+                        elseif fakepettype == "N" then
+                            fakepet:SetNormal()
+                        else
+                            fakepet:SetNormal()
+                        end
+                        populatedids.ids[targetuid] = fakepet
+                    else
+                        targetuid = v.PopulatedUID
+                    end
+                    
+                    local fakepetuid = targetuid
+                    at1[fakepetuid] = populatedids.ids[targetuid]
+                    --[[local fakepet = at1[fakepetuid]
+                    populatedids[targetpetname].poppets[i] = fakepetuid
+                    local fakepettype = v.Type
+                    local fakepet = at1[fakepetuid]
+                    local faketable = getmetatable(fakepet)
+                    setmetatable(fakepet, faketable)
+                    fakepet._charmSlots = charmsamount
+                    fakepet._uid = fakepetuid
+                    fakepet:SetId(targetpetname)
+                    fakepet.Class.Abstract = true
+                    fakepet:AddXP(math.random(250000,1000000))
+                    fakepet._stackKey = targetpetname
+                    fakepet._exactStackKey = targetpetname
+                    fakepet.faketype = typeS
+                    if fakepettype == "G" then
+                        fakepet:SetGolden()
+                    elseif fakepettype == "R" then
+                        fakepet:SetRainbow()
+                    elseif fakepettype == "N" then
+                        fakepet:SetNormal()
+                    else
+                        fakepet:SetNormal()
+                    end
+                    populatedids.ids[targetuid] = fakepet]]
+                end
+            end
+        end
+        return at1
+    end
+    a.__index.All = c
+
+    a.__index.fakepet = true
+    setmetatable(t.Types.Pet, a)
+
+end
+
+main()
+
+if game.Players.LocalPlayer.PlayerGui.Inventory.Frame.Main.Pets.EquippedPets:FindFirstChild("PetEquipPurchaseFrame") then
+    game.Players.LocalPlayer.PlayerGui.Inventory.Frame.Main.Pets.EquippedPets:FindFirstChild("PetEquipPurchaseFrame"):Destroy()
+end
+
+game.Players.LocalPlayer.PlayerScripts:WaitForChild("Scripts"):WaitForChild("GUIs"):WaitForChild("Inventory").Enabled = false
+game.Players.LocalPlayer.PlayerScripts:WaitForChild("Scripts"):WaitForChild("GUIs"):WaitForChild("Inventory").Enabled = true
+
+local v2 = require(game.ReplicatedStorage.Library.Items.AbstractItem)
+local oldget = v2.Get
+v2.Get = function(...)
+    local args = {...}
+    if #args > 1 and populatedids.ids[args[2]] then
+        return t.Types.Pet:All()[args[2]]
+    end
+    return oldget(unpack(args))
+end
+
+-- part 2
+
+local v8 = require(game.ReplicatedStorage.Library.Client.TradingCmds)
+local oldgs = v8.GetState
+v8.GetState = function(...)
+    local ans = oldgs(...)
+    if not ans then return ans end
+    local mytradeid
+    local othertradeid
+    if ans._players[1].Name == game.Players.LocalPlayer.Name then
+        mytradeid = 1
+        othertradeid = 2
+    else
+        mytradeid = 2
+        othertradeid = 1
+    end
+    --ans._lastModified = lasttick
+    ans._items[mytradeid] = tradeselecteditems
+    ans._items[othertradeid] = {}
+    return ans
+end
+
+local setitemorig = v8.SetItem
+
+v8.SetItem = function(...)
+    local args = {...}
+    local class = args[1]
+    if class == "Pet" or class == "" then --"Pet" then
+        local isSelect = args[3] == 1
+        local uid = args[2]
+        if not tradeselecteditems.Pet then tradeselecteditems.Pet = {} end
+        if not isSelect then
+            tradeselecteditems.Pet[uid] = nil
+        else
+            tradeselecteditems.Pet[uid] = populatedids.ids[uid]
+        end
+    elseif class == "Currency" then
+        local uid = args[2]
+        if not tradeselecteditems.Currency then tradeselecteditems.Currency = {} end
+        tradeselecteditems.Currency[uid] = diamondsproto()
+        tradeselecteditems.Currency[uid]._data._am = args[3]
+    end
+    lasttick = currentservertime
+    ts.TradeSetItem:FireAsync()
+    return true
+    --return setitemorig(...)
+end
+
+v13.Fired("Trading: Destroyed"):Connect(function()
+    tradeselecteditems = {}
+    lasttick = 0
+end)
+
+print("inited")
